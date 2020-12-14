@@ -13,7 +13,7 @@ import torch.utils.data
 import numpy as np
 
 from utils import CTCLabelConverter, CTCLabelConverterForBaiduWarpctc, AttnLabelConverter, Averager
-from dataset import hierarchical_dataset, AlignCollate, Batch_Balanced_Dataset
+from dataset import hierarchical_dataset, AlignCollate, Batch_Balanced_Dataset, iiit5k_dataset_builder
 from model import Model
 from test import validation
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -26,22 +26,32 @@ def train(opt):
         print('Filtering the images whose label is longer than opt.batch_max_length')
         # see https://github.com/clovaai/deep-text-recognition-benchmark/blob/6593928855fb7abb999a99f428b3e4477d4ae356/dataset.py#L130
 
-    opt.select_data = opt.select_data.split('-')
-    opt.batch_ratio = opt.batch_ratio.split('-')
-    train_dataset = Batch_Balanced_Dataset(opt)
+    # opt.select_data = opt.select_data.split('-')#[MJ,ST]
+    # opt.batch_ratio = opt.batch_ratio.split('-')#[0.5,0.5]
+    # train_dataset = Batch_Balanced_Dataset(opt)
 
-    log = open(f'./saved_models/{opt.exp_name}/log_dataset.txt', 'a')
+    # log = open(f'./saved_models/{opt.exp_name}/log_dataset.txt', 'a')
     AlignCollate_valid = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD)
-    valid_dataset, valid_dataset_log = hierarchical_dataset(root=opt.valid_data, opt=opt)
+    # valid_dataset, valid_dataset_log = hierarchical_dataset(root=opt.valid_data, opt=opt)
+    train_dataset = iiit5k_dataset_builder("/home/ldl/桌面/论文/文本识别/SAR/IIIT5K/train",
+        "/home/ldl/桌面/论文/文本识别/SAR/IIIT5K/traindata.mat",opt)
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset, batch_size=opt.batch_size,
+        shuffle=True,  # 'True' to check training progress with validation function.
+        num_workers=int(opt.workers),
+        collate_fn=AlignCollate_valid, pin_memory=True)
+
+    valid_dataset = iiit5k_dataset_builder("/home/ldl/桌面/论文/文本识别/SAR/IIIT5K/test",
+        "/home/ldl/桌面/论文/文本识别/SAR/IIIT5K/testdata.mat",opt)
     valid_loader = torch.utils.data.DataLoader(
         valid_dataset, batch_size=opt.batch_size,
         shuffle=True,  # 'True' to check training progress with validation function.
         num_workers=int(opt.workers),
         collate_fn=AlignCollate_valid, pin_memory=True)
-    log.write(valid_dataset_log)
+    # log.write(valid_dataset_log)
     print('-' * 80)
-    log.write('-' * 80 + '\n')
-    log.close()
+    # log.write('-' * 80 + '\n')
+    # log.close()
     
     """ model configuration """
     if 'CTC' in opt.Prediction:
@@ -141,17 +151,27 @@ def train(opt):
     best_accuracy = -1
     best_norm_ED = -1
     iteration = start_iter
+    epoch = 0
+    train_iter_loader = iter(train_loader)
 
     while(True):
         # train part
-        image_tensors, labels = train_dataset.get_batch()
+        try:
+
+            image_tensors, labels = train_iter_loader.next()
+        except StopIteration:
+            epoch += 1
+            print(f"epoch:{epoch}")
+            if epoch >= 60:
+                break
+            train_dataset = iter(train_loader)
         image = image_tensors.to(device)
         text, length = converter.encode(labels, batch_max_length=opt.batch_max_length)
         batch_size = image.size(0)
 
         if 'CTC' in opt.Prediction:
             preds = model(image, text)
-            preds_size = torch.IntTensor([preds.size(1)] * batch_size)
+            preds_size = torch.IntTensor([preds.size(1)] * preds.size(0))
             if opt.baiduCTC:
                 preds = preds.permute(1, 0, 2)  # to use CTCLoss format
                 cost = criterion(preds, text, preds_size, length) / batch_size

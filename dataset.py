@@ -12,6 +12,7 @@ import numpy as np
 from torch.utils.data import Dataset, ConcatDataset, Subset
 from torch._utils import _accumulate
 import torchvision.transforms as transforms
+from scipy.io import loadmat
 
 
 class Batch_Balanced_Dataset(object):
@@ -125,6 +126,65 @@ def hierarchical_dataset(root, opt, select_data='/'):
 
     return concatenated_dataset, dataset_log
 
+def iiit5k_mat_extractor(label_path):
+    '''
+    This code is to extract mat labels from IIIT5k dataset
+    Input:
+    label_path: mat label path file
+    Output:
+    dict_img: [image_name, labels, small_lexicon, medium_lexicon]
+    '''
+    # create empty list for news items
+    dict_img = []
+
+    mat_contents = loadmat(label_path)
+
+    if 'traindata' in mat_contents:
+        key = 'traindata'
+    else:
+        key = 'testdata'
+    for i in range(len(mat_contents[key][0])):
+        name = mat_contents[key][0][i][0][0]
+        label = mat_contents[key][0][i][1][0]
+        #small_lexi = [item[0] for item in mat_contents[key][0][i][2][0]]
+        #medium_lexi = [item[0] for item in mat_contents[key][0][i][3][0]]
+        dict_img.append([name, label])
+
+    return dict_img
+
+class iiit5k_dataset_builder(Dataset):
+    def __init__(self,total_img_path, annotation_path,opt):
+        '''
+        total_img_path: path with all images
+        annotation_path: mat labeling file
+        '''
+        self.opt = opt
+        self.total_img_path = total_img_path
+        self.dictionary = iiit5k_mat_extractor(annotation_path)
+        self.total_img_name = os.listdir(total_img_path)
+        self.dataset = []
+
+        for items in self.dictionary:
+            if items[0].split('/')[-1] in self.total_img_name:
+                self.dataset.append([items[0].split('/')[-1],items[1]])
+
+    def __getitem__(self, index):
+        img_name, label = self.dataset[index]
+        if self.opt.rgb:
+            img = Image.open(os.path.join(self.total_img_path,img_name)).convert('RGB')  # for color image
+        else:
+            img = Image.open(os.path.join(self.total_img_path,img_name)).convert('L')
+        if not self.opt.sensitive:
+            label = label.lower()
+
+        # We only train and evaluate on alphanumerics (or pre-defined character set in train.py)
+        out_of_char = f'[^{self.opt.character}]'
+        label = re.sub(out_of_char, '', label)
+
+        return (img, label)
+
+    def __len__(self):
+        return len(self.dataset)
 
 class LmdbDataset(Dataset):
 
