@@ -13,10 +13,10 @@ import torch.utils.data
 import numpy as np
 
 from utils import CTCLabelConverter, CTCLabelConverterForBaiduWarpctc, AttnLabelConverter, Averager
-from dataset import hierarchical_dataset, AlignCollate, Batch_Balanced_Dataset, iiit5k_dataset_builder
+from dataset import hierarchical_dataset, AlignCollate, Batch_Balanced_Dataset, iiit5k_dataset_builder,TextRecognition
 from model import Model
 from test import validation
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 
 def train(opt):
@@ -33,21 +33,23 @@ def train(opt):
     # log = open(f'./saved_models/{opt.exp_name}/log_dataset.txt', 'a')
     AlignCollate_valid = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD)
     # valid_dataset, valid_dataset_log = hierarchical_dataset(root=opt.valid_data, opt=opt)
-    train_dataset = iiit5k_dataset_builder("/home/ldl/桌面/论文/文本识别/SAR/IIIT5K/train",
-        "/home/ldl/桌面/论文/文本识别/SAR/IIIT5K/traindata.mat",opt)
+    # train_dataset = iiit5k_dataset_builder("/media/ps/hd1/lll/textRecognition/SAR/IIIT5K/train",
+    #     "/media/ps/hd1/lll/textRecognition/SAR/IIIT5K/traindata.mat",opt)
+    train_dataset = TextRecognition(4068*100)
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=opt.batch_size,
         shuffle=True,  # 'True' to check training progress with validation function.
         num_workers=int(opt.workers),
-        collate_fn=AlignCollate_valid, pin_memory=True)
+        collate_fn=AlignCollate_valid)
 
-    valid_dataset = iiit5k_dataset_builder("/home/ldl/桌面/论文/文本识别/SAR/IIIT5K/test",
-        "/home/ldl/桌面/论文/文本识别/SAR/IIIT5K/testdata.mat",opt)
+    # valid_dataset = iiit5k_dataset_builder("/media/ps/hd1/lll/textRecognition/SAR/IIIT5K/test",
+    #     "/media/ps/hd1/lll/textRecognition/SAR/IIIT5K/testdata.mat",opt)
+    valid_dataset = TextRecognition(4068)
     valid_loader = torch.utils.data.DataLoader(
         valid_dataset, batch_size=opt.batch_size,
         shuffle=True,  # 'True' to check training progress with validation function.
         num_workers=int(opt.workers),
-        collate_fn=AlignCollate_valid, pin_memory=True)
+        collate_fn=AlignCollate_valid)
     # log.write(valid_dataset_log)
     print('-' * 80)
     # log.write('-' * 80 + '\n')
@@ -86,7 +88,11 @@ def train(opt):
             continue
 
     # data parallel for multi-GPU
-    model = torch.nn.DataParallel(model).to(device)
+    if opt.num_gpu > 1:
+    
+        model = torch.nn.DataParallel(model).to(device)
+    else:
+        model.to(device)
     model.train()
     if opt.saved_model != '':
         print(f'loading pretrained model from {opt.saved_model}')
@@ -95,7 +101,7 @@ def train(opt):
         else:
             model.load_state_dict(torch.load(opt.saved_model))
     print("Model:")
-    print(model)
+    # print(model)
 
     """ setup loss """
     if 'CTC' in opt.Prediction:
@@ -159,12 +165,21 @@ def train(opt):
         try:
 
             image_tensors, labels = train_iter_loader.next()
+            if len(labels)>80:
+                print(labels)
+            print("{:4}".format(iteration),end='\r')
         except StopIteration:
             epoch += 1
             print(f"epoch:{epoch}")
-            if epoch >= 60:
+            if epoch >= opt.eps:
                 break
-            train_dataset = iter(train_loader)
+            # train_loader = torch.utils.data.DataLoader(
+            #     train_dataset, batch_size=opt.batch_size,
+            #     shuffle=True,  # 'True' to check training progress with validation function.
+            #     num_workers=int(opt.workers),
+            #     collate_fn=AlignCollate_valid)
+            train_iter_loader = iter(train_loader)
+            continue
         image = image_tensors.to(device)
         text, length = converter.encode(labels, batch_max_length=opt.batch_max_length)
         batch_size = image.size(0)
@@ -177,7 +192,11 @@ def train(opt):
                 cost = criterion(preds, text, preds_size, length) / batch_size
             else:
                 preds = preds.log_softmax(2).permute(1, 0, 2)
-                cost = criterion(preds, text, preds_size, length)
+                try:
+                    cost = criterion(preds, text, preds_size, length)
+                except Exception:
+                    print(preds.shape,preds_size.shape)
+                    raise ''
 
         else:
             preds = model(image, text[:, :-1])  # align with Attention.forward
@@ -197,6 +216,7 @@ def train(opt):
             # for log
             with open(f'./saved_models/{opt.exp_name}/log_train.txt', 'a') as log:
                 model.eval()
+                print("validation")
                 with torch.no_grad():
                     valid_loss, current_accuracy, current_norm_ED, preds, confidence_score, labels, infer_time, length_of_data = validation(
                         model, criterion, valid_loader, converter, opt)
@@ -293,6 +313,7 @@ if __name__ == '__main__':
     parser.add_argument('--output_channel', type=int, default=512,
                         help='the number of output channel of Feature extractor')
     parser.add_argument('--hidden_size', type=int, default=256, help='the size of the LSTM hidden state')
+    parser.add_argument('--num_gpu',type=int,default=1)
 
     opt = parser.parse_args()
 
@@ -304,12 +325,15 @@ if __name__ == '__main__':
     os.makedirs(f'./saved_models/{opt.exp_name}', exist_ok=True)
 
     """ vocab / character number configuration """
+    if os.path.isfile(opt.character):
+        opt.character = ''.join([i[0] for i in open(opt.character)])
     if opt.sensitive:
         # opt.character += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
         opt.character = string.printable[:-6]  # same with ASTER setting (use 94 char).
 
+
     """ Seed and GPU setting """
-    # print("Random Seed: ", opt.manualSeed)
+    print("Random Seed: ", opt.manualSeed)
     random.seed(opt.manualSeed)
     np.random.seed(opt.manualSeed)
     torch.manual_seed(opt.manualSeed)
@@ -317,7 +341,7 @@ if __name__ == '__main__':
 
     cudnn.benchmark = True
     cudnn.deterministic = True
-    opt.num_gpu = torch.cuda.device_count()
+    # opt.num_gpu = torch.cuda.device_count()
     # print('device count', opt.num_gpu)
     if opt.num_gpu > 1:
         print('------ Use multi-GPU setting ------')

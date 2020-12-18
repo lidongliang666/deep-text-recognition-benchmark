@@ -14,6 +14,8 @@ from torch._utils import _accumulate
 import torchvision.transforms as transforms
 from scipy.io import loadmat
 
+sys.path.insert(0,"/media/ps/hd1/lll/textRecognition/mytrdg/")
+from trdg.generators import GeneratorFromDict
 
 class Batch_Balanced_Dataset(object):
 
@@ -185,6 +187,43 @@ class iiit5k_dataset_builder(Dataset):
 
     def __len__(self):
         return len(self.dataset)
+
+class TextRecognition(Dataset):
+    def __init__(self,count):
+        self.count = count
+        fonts_dir = "/media/ps/hd1/lll/textRecognition/mytrdg/trdg/fonts/cn"
+        fonts = [os.path.join(fonts_dir,i) for i in os.listdir(fonts_dir)]
+        dictpath = "/media/ps/hd1/lll/textRecognition/mytrdg/trdg/mydicts/all_4068.txt"
+        img_dir = "/media/ps/hd1/lll/textRecognition/mytrdg/trdg/images"
+        self.args = dict(
+            count=self.count,
+            length=89,
+            allow_variable=True,
+            fonts=fonts,
+            language=dictpath,
+            size=64,
+            blur=2,
+            random_blur=True,
+            image_dir=img_dir,
+            background_type=[0,1,2,3],
+            distorsion_type=[0,1,2],
+            text_color="#000000,#FF8F8F",
+            image_mode="L",
+            char_cat="",
+            space_width=[1,2,3,4],
+            character_spacing=[0,1,2,3,4,5])
+        self.generator = GeneratorFromDict(**self.args)
+
+    def __getitem__(self,index):
+        try:
+            img,label = self.generator.next()
+        except StopIteration:
+            self.generator = GeneratorFromDict(**self.args)
+            img,label = self.generator.next()
+        return img,label
+
+    def __len__(self):
+        return self.count
 
 class LmdbDataset(Dataset):
 
@@ -397,3 +436,11 @@ def tensor2im(image_tensor, imtype=np.uint8):
 def save_image(image_numpy, image_path):
     image_pil = Image.fromarray(image_numpy)
     image_pil.save(image_path)
+
+
+if __name__ == "__main__":
+    textrecongnition = TextRecognition()
+    for i in range(10):
+        img,label = textrecongnition[i]
+        print(label)
+        img.save(f'./out/{i}.jpg')

@@ -87,6 +87,7 @@ def validation(model, criterion, evaluation_loader, converter, opt):
     valid_loss_avg = Averager()
 
     for i, (image_tensors, labels) in enumerate(evaluation_loader):
+        print("{:4}".format(i),end='\r')
         batch_size = image_tensors.size(0)
         length_of_data = length_of_data + batch_size
         image = image_tensors.to(device)
