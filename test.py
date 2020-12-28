@@ -12,9 +12,9 @@ import numpy as np
 from nltk.metrics.distance import edit_distance
 
 from utils import CTCLabelConverter, AttnLabelConverter, Averager
-from dataset import hierarchical_dataset, AlignCollate
+from dataset import hierarchical_dataset, AlignCollate, TalOcrChnDataset
 from model import Model
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 
 def benchmark_all_eval(model, criterion, converter, opt, calculate_infer_time=False):
@@ -78,7 +78,7 @@ def benchmark_all_eval(model, criterion, converter, opt, calculate_infer_time=Fa
     return None
 
 
-def validation(model, criterion, evaluation_loader, converter, opt):
+def validation(model, criterion, evaluation_loader, converter, opt, printlabel=False):
     """ validation or evaluation """
     n_correct = 0
     norm_ED = 0
@@ -156,7 +156,8 @@ def validation(model, criterion, evaluation_loader, converter, opt):
 
             if pred == gt:
                 n_correct += 1
-
+            if printlabel:
+                print(pred,"----",gt)
             '''
             (old version) ICDAR2017 DOST Normalized Edit Distance https://rrc.cvc.uab.es/?ch=7&com=tasks
             "For each word we calculate the normalized edit distance to the length of the ground truth transcription."
@@ -202,7 +203,9 @@ def test(opt):
     print('model input parameters', opt.imgH, opt.imgW, opt.num_fiducial, opt.input_channel, opt.output_channel,
           opt.hidden_size, opt.num_class, opt.batch_max_length, opt.Transformation, opt.FeatureExtraction,
           opt.SequenceModeling, opt.Prediction)
-    model = torch.nn.DataParallel(model).to(device)
+    
+    # model = torch.nn.DataParallel(model).to(device)
+    model = model.to(device=device)
 
     # load model
     print('loading pretrained model from %s' % opt.saved_model)
@@ -228,15 +231,19 @@ def test(opt):
         else:
             log = open(f'./result/{opt.exp_name}/log_evaluation.txt', 'a')
             AlignCollate_evaluation = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD)
-            eval_data, eval_data_log = hierarchical_dataset(root=opt.eval_data, opt=opt)
+            if opt.eval_data == "haoweilai":
+                eval_data = TalOcrChnDataset("/home/ldl/桌面/论文/文本识别/data/TAL_OCR_CHN手写中文数据集/test_64")
+            else:    
+                eval_data, eval_data_log = hierarchical_dataset(root=opt.eval_data, opt=opt)
+                log.write(eval_data_log)
             evaluation_loader = torch.utils.data.DataLoader(
                 eval_data, batch_size=opt.batch_size,
                 shuffle=False,
                 num_workers=int(opt.workers),
                 collate_fn=AlignCollate_evaluation, pin_memory=True)
             _, accuracy_by_best_model, _, _, _, _, _, _ = validation(
-                model, criterion, evaluation_loader, converter, opt)
-            log.write(eval_data_log)
+                model, criterion, evaluation_loader, converter, opt,printlabel=True)
+            
             print(f'{accuracy_by_best_model:0.3f}')
             log.write(f'{accuracy_by_best_model:0.3f}\n')
             log.close()
@@ -273,6 +280,8 @@ if __name__ == '__main__':
     opt = parser.parse_args()
 
     """ vocab / character number configuration """
+    if os.path.isfile(opt.character):
+        opt.character = ''.join([i[0] for i in open(opt.character)])
     if opt.sensitive:
         opt.character = string.printable[:-6]  # same with ASTER setting (use 94 char).
 

@@ -14,7 +14,7 @@ from torch._utils import _accumulate
 import torchvision.transforms as transforms
 from scipy.io import loadmat
 
-sys.path.insert(0,"/media/ps/hd1/lll/textRecognition/mytrdg/")
+sys.path.insert(0,"/home/ldl/桌面/论文/文本识别/TextRecognitionDataGenerator")
 from trdg.generators import GeneratorFromDict
 
 class Batch_Balanced_Dataset(object):
@@ -189,15 +189,15 @@ class iiit5k_dataset_builder(Dataset):
         return len(self.dataset)
 
 class TextRecognition(Dataset):
-    def __init__(self,count):
+    def __init__(self,count,textlength,dictpath):
         self.count = count
-        fonts_dir = "/media/ps/hd1/lll/textRecognition/mytrdg/trdg/fonts/cn"
+        fonts_dir = "/home/ldl/桌面/python-notebook/My_trdg/trdg/fonts/cn"
         fonts = [os.path.join(fonts_dir,i) for i in os.listdir(fonts_dir)]
-        dictpath = "/media/ps/hd1/lll/textRecognition/mytrdg/trdg/mydicts/all_4068.txt"
-        img_dir = "/media/ps/hd1/lll/textRecognition/mytrdg/trdg/images"
+        # dictpath = "/home/ldl/桌面/论文/文本识别/TextRecognitionDataGenerator/trdg/mydicts/all_4068.txt"
+        img_dir = "/home/ldl/桌面/论文/文本识别/TextRecognitionDataGenerator/trdg/images"
         self.args = dict(
             count=self.count,
-            length=89,
+            length=textlength,
             allow_variable=True,
             fonts=fonts,
             language=dictpath,
@@ -220,7 +220,24 @@ class TextRecognition(Dataset):
         except StopIteration:
             self.generator = GeneratorFromDict(**self.args)
             img,label = self.generator.next()
+        
         return img,label
+
+    def __len__(self):
+        return self.count
+
+class TalOcrChnDataset(Dataset):
+
+    def __init__(self,root):
+        self.root = root
+        self.count = len(os.listdir(root)) // 2
+
+    def __getitem__(self,index):
+        labelpath = os.path.join(self.root,f"{index}.txt")
+        with open(labelpath,'r') as f:
+            label = f.read().strip()
+        imgpath = os.path.join(self.root,f"{index}.jpg")
+        return Image.open(imgpath).convert('L'), label
 
     def __len__(self):
         return self.count
@@ -439,8 +456,27 @@ def save_image(image_numpy, image_path):
 
 
 if __name__ == "__main__":
-    textrecongnition = TextRecognition()
-    for i in range(10):
-        img,label = textrecongnition[i]
+
+    # train_dataset = TextRecognition(4068*100)
+    # AlignCollate_valid = AlignCollate(imgH=48, imgW=1024, keep_ratio_with_pad=True)
+    # train_loader = torch.utils.data.DataLoader(
+    #     train_dataset, batch_size=32,
+    #     shuffle=True,  # 'True' to check training progress with validation function.
+    #     num_workers=int(4),
+    #     collate_fn=AlignCollate_valid)
+    # for i,(img,lables) in enumerate(train_loader):
+    #     for j,label in  enumerate( lables):
+    #         if " " in label or len(label)> 89:
+    #             # print(lables)
+    #             print(label,len(label),j)
+    #     print("{:5}".format(i))
+    #     if i > 1000:
+    #         break
+    ##################################################
+    train_dataset = TalOcrChnDataset("/home/ldl/桌面/论文/文本识别/data/TAL_OCR_CHN手写中文数据集/test_64")
+    print(len(train_dataset))
+    for i,(img,label) in enumerate( train_dataset):
         print(label)
-        img.save(f'./out/{i}.jpg')
+        img.save(f"/home/ldl/桌面/out/{label}.jpg")
+        if i >= 100:
+            break 

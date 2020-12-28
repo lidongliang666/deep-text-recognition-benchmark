@@ -10,6 +10,7 @@ import torch.backends.cudnn as cudnn
 import torch.nn.init as init
 import torch.optim as optim
 import torch.utils.data
+from torch.utils.data import ConcatDataset
 import numpy as np
 
 from utils import CTCLabelConverter, CTCLabelConverterForBaiduWarpctc, AttnLabelConverter, Averager
@@ -35,7 +36,9 @@ def train(opt):
     # valid_dataset, valid_dataset_log = hierarchical_dataset(root=opt.valid_data, opt=opt)
     # train_dataset = iiit5k_dataset_builder("/media/ps/hd1/lll/textRecognition/SAR/IIIT5K/train",
     #     "/media/ps/hd1/lll/textRecognition/SAR/IIIT5K/traindata.mat",opt)
-    train_dataset = TextRecognition(4068*100)
+    train_dataset_chinese = TextRecognition(4068*75,opt.charalength,opt.characterfile)
+    train_dataset_english = TextRecognition(4068*25,opt.charalength,opt.englishfile)
+    train_dataset = ConcatDataset([train_dataset_chinese,train_dataset_english])
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=opt.batch_size,
         shuffle=True,  # 'True' to check training progress with validation function.
@@ -44,7 +47,9 @@ def train(opt):
 
     # valid_dataset = iiit5k_dataset_builder("/media/ps/hd1/lll/textRecognition/SAR/IIIT5K/test",
     #     "/media/ps/hd1/lll/textRecognition/SAR/IIIT5K/testdata.mat",opt)
-    valid_dataset = TextRecognition(4068)
+    valid_dataset_chinese = TextRecognition(1001,opt.charalength,opt.characterfile)
+    valid_dataset_english = TextRecognition(1001,opt.charalength,opt.englishfile)
+    valid_dataset = ConcatDataset([valid_dataset_chinese,valid_dataset_english])
     valid_loader = torch.utils.data.DataLoader(
         valid_dataset, batch_size=opt.batch_size,
         shuffle=True,  # 'True' to check training progress with validation function.
@@ -126,10 +131,11 @@ def train(opt):
     # [print(name, p.numel()) for name, p in filter(lambda p: p[1].requires_grad, model.named_parameters())]
 
     # setup optimizer
-    if opt.adam:
-        optimizer = optim.Adam(filtered_parameters, lr=opt.lr, betas=(opt.beta1, 0.999))
-    else:
-        optimizer = optim.Adadelta(filtered_parameters, lr=opt.lr, rho=opt.rho, eps=opt.eps)
+    # if opt.adam:
+    #     optimizer = optim.Adam(filtered_parameters, lr=opt.lr, betas=(opt.beta1, 0.999))
+    # else:
+    #     optimizer = optim.Adadelta(filtered_parameters, lr=opt.lr, rho=opt.rho, eps=opt.eps)
+    optimizer = optim.Adam(filtered_parameters)
     print("Optimizer:")
     print(optimizer)
 
@@ -171,7 +177,7 @@ def train(opt):
         except StopIteration:
             epoch += 1
             print(f"epoch:{epoch}")
-            if epoch >= opt.eps:
+            if epoch >= 1:
                 break
             # train_loader = torch.utils.data.DataLoader(
             #     train_dataset, batch_size=opt.batch_size,
@@ -256,10 +262,10 @@ def train(opt):
                 log.write(predicted_result_log + '\n')
 
         # save model per 1e+5 iter.
-        if (iteration + 1) % 1e+5 == 0:
+        if (iteration + 1) % 1e+4 == 0:
             torch.save(
                 model.state_dict(), f'./saved_models/{opt.exp_name}/iter_{iteration+1}.pth')
-
+            os.remove(f'./saved_models/{opt.exp_name}/iter_{iteration+1-1e+4}.pth')
         if (iteration + 1) == opt.num_iter:
             print('end the training')
             sys.exit()
@@ -298,6 +304,10 @@ if __name__ == '__main__':
     parser.add_argument('--rgb', action='store_true', help='use rgb input')
     parser.add_argument('--character', type=str,
                         default='0123456789abcdefghijklmnopqrstuvwxyz', help='character label')
+    parser.add_argument('--characterfile', type=str,
+                        default='None', help='character label file')
+    parser.add_argument('--charalength',type=int,help='GAN char length')
+    parser.add_argument('--englishfile',type=str,help='english char dict file')
     parser.add_argument('--sensitive', action='store_true', help='for sensitive character mode')
     parser.add_argument('--PAD', action='store_true', help='whether to keep ratio then pad for image resize')
     parser.add_argument('--data_filtering_off', action='store_true', help='for data_filtering_off mode')
@@ -325,8 +335,8 @@ if __name__ == '__main__':
     os.makedirs(f'./saved_models/{opt.exp_name}', exist_ok=True)
 
     """ vocab / character number configuration """
-    if os.path.isfile(opt.character):
-        opt.character = ''.join([i[0] for i in open(opt.character)])
+    if os.path.isfile(opt.characterfile):
+        opt.character = ''.join([i[0] for i in open(opt.characterfile)])
     if opt.sensitive:
         # opt.character += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
         opt.character = string.printable[:-6]  # same with ASTER setting (use 94 char).
