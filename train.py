@@ -177,8 +177,8 @@ def train(opt):
         except StopIteration:
             epoch += 1
             print(f"epoch:{epoch}")
-            if epoch >= 1:
-                break
+            # if epoch >= 1:
+            #     break
             # train_loader = torch.utils.data.DataLoader(
             #     train_dataset, batch_size=opt.batch_size,
             #     shuffle=True,  # 'True' to check training progress with validation function.
@@ -265,7 +265,6 @@ def train(opt):
         if (iteration + 1) % 1e+4 == 0:
             torch.save(
                 model.state_dict(), f'./saved_models/{opt.exp_name}/iter_{iteration+1}.pth')
-            os.remove(f'./saved_models/{opt.exp_name}/iter_{iteration+1-1e+4}.pth')
         if (iteration + 1) == opt.num_iter:
             print('end the training')
             sys.exit()

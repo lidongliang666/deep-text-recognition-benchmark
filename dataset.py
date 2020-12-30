@@ -153,6 +153,60 @@ def iiit5k_mat_extractor(label_path):
         dict_img.append([name, label])
 
     return dict_img
+class base_cutimg_dataset(Dataset):
+    def __init__(self,total_img_path,annotation_path,rgb_mode=False,sensitive=False):
+        self.total_img_path = total_img_path
+        self.annotation_path = annotation_path
+        self.rgb_mode = rgb_mode
+        self.sensitive = sensitive
+
+        self.dataset = self.loaddataset(total_img_path,annotation_path)
+
+    def loaddataset(self, total_img_path, annotation_path):
+        raise NotImplementedError
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self,index):
+        img_name, bdb, label = self.dataset[index]
+        
+        if self.rgb_mode:
+            img = Image.open(os.path.join(self.total_img_path,img_name)).convert('RGB')  # for color image
+            print(img.size)
+            (W,H,_) = img.size
+            
+        else:
+            img = Image.open(os.path.join(self.total_img_path,img_name)).convert('L')
+            W,H = img.size
+        bdb = self.ctrl_xt(bdb,H,W)
+        print(H,W,bdb,label)
+        img = img.crop(bdb)
+        return img, label
+    
+    def ctrl_xt(self,bdb,imgH,imgW):
+        tleft_x,tleft_y,bright_x,bright_y = bdb
+        tleft_x = max(0,tleft_x)
+        tleft_y = max(0,tleft_y)
+        bright_x = min(imgW-1,bright_x)
+        bright_y = min(imgH-1,bright_y)
+
+        return tleft_x,tleft_y,bright_x,bright_y
+
+class mytrdg_cutimg_dataset(base_cutimg_dataset):
+    def __init__(self,**argsdict):
+        super().__init__(**argsdict)
+
+    def loaddataset(self,total_img_path, annotation_path):
+        dataset = []
+        for labelname in os.listdir(annotation_path):
+            imgname = labelname[:-3]+'jpg'
+            for line in open(os.path.join(annotation_path,labelname)):
+                # print(line)
+                tleft_x,tleft_y,_,_,bright_x,bright_y,_,_,*label = line.split(',')
+                dataset.append([imgname,[int(tleft_x),int(tleft_y),int(bright_x),int(bright_y)],','.join(label).strip()])
+        return dataset
+
 
 class iiit5k_dataset_builder(Dataset):
     def __init__(self,total_img_path, annotation_path,opt):
@@ -473,10 +527,19 @@ if __name__ == "__main__":
     #     if i > 1000:
     #         break
     ##################################################
-    train_dataset = TalOcrChnDataset("/home/ldl/桌面/论文/文本识别/data/TAL_OCR_CHN手写中文数据集/test_64")
+    # train_dataset = TalOcrChnDataset("/home/ldl/桌面/论文/文本识别/data/TAL_OCR_CHN手写中文数据集/test_64")
+    # print(len(train_dataset))
+    # for i,(img,label) in enumerate( train_dataset):
+    #     print(label)
+    #     img.save(f"/home/ldl/桌面/out/{label}.jpg")
+    #     if i >= 100:
+    #         break 
+
+    train_dataset = mytrdg_cutimg_dataset(total_img_path='/home/ldl/桌面/论文/文本检测/data/trdg_for_detector/train/images',
+        annotation_path='/home/ldl/桌面/论文/文本检测/data/trdg_for_detector/train/label')
     print(len(train_dataset))
-    for i,(img,label) in enumerate( train_dataset):
+    for i, (img,label) in enumerate(train_dataset):
         print(label)
-        img.save(f"/home/ldl/桌面/out/{label}.jpg")
+        img.save(f'/home/ldl/桌面/out/{i}.jpg')
         if i >= 100:
-            break 
+            break
