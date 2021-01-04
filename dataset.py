@@ -5,6 +5,7 @@ import six
 import math
 import lmdb
 import torch
+import random
 
 from natsort import natsorted
 from PIL import Image
@@ -296,6 +297,99 @@ class TalOcrChnDataset(Dataset):
     def __len__(self):
         return self.count
 
+class TalOcrEngDataset(Dataset):
+
+    def __init__(self,imgdir,labeltxtfile,rgb_mode=False):
+        self.imgdir = imgdir
+        self.dataset = self.loaddataset(labeltxtfile)
+        self.rgb_mode = rgb_mode
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self,index):
+        imgname,label = self.dataset[index]
+
+        if self.rgb_mode:
+            return Image.open(os.path.join(self.imgdir,imgname)).convert('RGB'), label
+        else:
+            return Image.open(os.path.join(self.imgdir,imgname)).convert('L'), label
+
+    def loaddataset(self,labeltxtfile):
+        dataset = []
+        for line in open(labeltxtfile):
+            imgname,label = line.split("jpg ")
+            dataset.append([imgname+'jpg',label.strip()])
+        return dataset
+
+class PpocrDataset(Dataset):
+
+    def __init__(self,imgdir,labelfilepath,length,rgb_mode=False,split='\t'):
+        self.imgdir = imgdir
+        self.length = length
+        self.rgb_mode = rgb_mode
+        self.labeliter = open(labelfilepath)
+        self.split = split
+        # self.number = 0
+        # self.test = test
+        self.dataset = [self.get_imgname_label(i) for i in open(labelfilepath) if (not i  is None)]
+
+    def __len__(self):
+        return self.length
+        # return len(self.dataset)
+ 
+    def __getitem__(self,index):
+        # if self.test and self.number<4000:
+        #     imgname,label = random.choice(self.dataset)
+        #     self.number += 1
+        # elif self.number >= 4000:
+        #     self.number = 0
+        #     raise StopIteration
+        # else:
+        #     imgname,label = self.dataset[index]
+        
+        imgname,label =  random.choice(self.dataset)
+
+        try:
+            if self.rgb_mode:
+                
+                return Image.open(os.path.join(self.imgdir,imgname)).convert('RGB'), label
+            else:
+                return Image.open(os.path.join(self.imgdir,imgname)).convert('L'), label
+        except:
+            return None
+    
+    def get_imgname_label(self,line):
+
+        # print(line)
+        try:
+            imgname,label = line.split(self.split)
+            
+            if imgname.startswith("Chinese_dataset") or imgname.startswith("Synthetic_Chinese_String_Dataset"):
+                imgdir ,imgname = imgname.split('/')
+                imgname = os.path.join(imgdir,"images",imgname)
+            label = label.strip()
+        except:
+            print(line)
+            return None
+        # 过滤掉比九十还大的样本
+        if len(label) > 90:
+            return None
+        return ((imgname+self.split).strip(),label)
+
+class PpocrDataset_formtwi(PpocrDataset):
+
+    def __init__(self,*args):
+        super().__init__(*args)
+    
+    def get_imgname_label(self,line):
+        try:
+            s = line.split(".jpg")
+            imgname = '.jpg'.join(s[:-1])+'.jpg'
+            label = s[-1].strip()
+            return (imgname,label)
+        except :
+            return None
 class LmdbDataset(Dataset):
 
     def __init__(self, root, opt):
@@ -453,7 +547,6 @@ class NormalizePAD(object):
         Pad_img[:, :, :w] = img  # right pad
         if self.max_size[2] != w:  # add border Pad
             Pad_img[:, :, w:] = img[:, :, w - 1].unsqueeze(2).expand(c, h, self.max_size[2] - w)
-
         return Pad_img
 
 
@@ -467,20 +560,26 @@ class AlignCollate(object):
     def __call__(self, batch):
         batch = filter(lambda x: x is not None, batch)
         images, labels = zip(*batch)
-
+        wlist = []
+        for image in images:
+            w, h = image.size
+            ratio = w / float(h)
+            wlist.append(math.ceil(self.imgH * ratio))
+        
         if self.keep_ratio_with_pad:  # same concept with 'Rosetta' paper
-            resized_max_w = self.imgW
+            resized_max_w = max(wlist)
+            resized_max_w = resized_max_w if resized_max_w <= self.imgW else self.imgW
             input_channel = 3 if images[0].mode == 'RGB' else 1
+
             transform = NormalizePAD((input_channel, self.imgH, resized_max_w))
 
             resized_images = []
-            for image in images:
-                w, h = image.size
-                ratio = w / float(h)
-                if math.ceil(self.imgH * ratio) > self.imgW:
+            for i,image in enumerate(images):
+                
+                if wlist[i] > self.imgW:
                     resized_w = self.imgW
                 else:
-                    resized_w = math.ceil(self.imgH * ratio)
+                    resized_w = wlist[i]
 
                 resized_image = image.resize((resized_w, self.imgH), Image.BICUBIC)
                 resized_images.append(transform(resized_image))
@@ -528,18 +627,55 @@ if __name__ == "__main__":
     #         break
     ##################################################
     # train_dataset = TalOcrChnDataset("/home/ldl/桌面/论文/文本识别/data/TAL_OCR_CHN手写中文数据集/test_64")
+    # train_dataset = TalOcrEngDataset("/home/ldl/桌面/论文/文本识别/data/TAL_OCR_ENG手写英文数据集/data_composition",
+    #     "/home/ldl/桌面/论文/文本识别/data/TAL_OCR_ENG手写英文数据集/label_test.txt")
     # print(len(train_dataset))
     # for i,(img,label) in enumerate( train_dataset):
     #     print(label)
     #     img.save(f"/home/ldl/桌面/out/{label}.jpg")
     #     if i >= 100:
     #         break 
+    ############################
+    # train_dataset = mytrdg_cutimg_dataset(total_img_path='/home/ldl/桌面/论文/文本检测/data/trdg_for_detector/train/images',
+    #     annotation_path='/home/ldl/桌面/论文/文本检测/data/trdg_for_detector/train/label')
+    # print(len(train_dataset))
+    # for i, (img,label) in enumerate(train_dataset):
+    #     print(label)
+    #     img.save(f'/home/ldl/桌面/out/{i}.jpg')
+    #     if i >= 100:
+    #         break
+    ######################
+    dataset_ICDAR2019_ArT = PpocrDataset("/home/ldl/桌面/论文/文本识别/data/paddleocr/ICDAR2019-ArT",
+        "/home/ldl/桌面/论文/文本识别/data/paddleocr/ICDAR2019-ArT.txt",50029)
+    dataset_rctw = PpocrDataset("/home/ldl/桌面/论文/文本识别/data/paddleocr/icdar2017rctw_train_v1.2",
+        "/home/ldl/桌面/论文/文本识别/data/paddleocr/icdar2017rctw_train_v1.2.txt",46739)
+    dataset_ICDAR2019 = PpocrDataset("/home/ldl/桌面/论文/文本识别/data/paddleocr/ICDAR2019-LSVT",
+        "/home/ldl/桌面/论文/文本识别/data/paddleocr/ICDAR2019-LSVT.txt",240047)
+    dataset_mtwi = PpocrDataset("/home/ldl/桌面/论文/文本识别/data/paddleocr/mtwi_2018",
+        "/home/ldl/桌面/论文/文本识别/data/paddleocr/mtwi_2018.txt",144202)
+    dataset_chn = PpocrDataset("/home/ldl/桌面/论文/文本识别/data/paddleocr/中文街景文字识别",
+        "/home/ldl/桌面/论文/文本识别/data/paddleocr/中文街景文字识别.txt",212023)
+    dataset_Synthetic = PpocrDataset("/home/ldl/桌面/论文/文本识别/data/paddleocr/Synthetic_Chinese_String_Dataset/images",
+    "/home/ldl/桌面/论文/文本识别/data/paddleocr/Synthetic_Chinese_String_Dataset/train.txt",3279606)
+    # dataset = ConcatDataset([dataset_ICDAR2019_ArT,dataset_rctw,dataset_ICDAR2019,dataset_Synthetic,
+    #     dataset_chn,dataset_mtwi])
+    
+    # print(len(dataset))
+    labelmaxlength = 0
+    maxwidth = 0
+    s = ''
+    for i, batch in enumerate(dataset_mtwi):
+        if batch :
+            image,lalel = batch
+        else:
+            continue
+        W,H = image.size
+        resizeW = W / H *32
+        if resizeW > maxwidth:
+            maxwidth = resizeW
+        if len(lalel) > labelmaxlength:
+            labelmaxlength = len(lalel)
+            s = lalel
+        print(f'{i:09}',end="\r")
 
-    train_dataset = mytrdg_cutimg_dataset(total_img_path='/home/ldl/桌面/论文/文本检测/data/trdg_for_detector/train/images',
-        annotation_path='/home/ldl/桌面/论文/文本检测/data/trdg_for_detector/train/label')
-    print(len(train_dataset))
-    for i, (img,label) in enumerate(train_dataset):
-        print(label)
-        img.save(f'/home/ldl/桌面/out/{i}.jpg')
-        if i >= 100:
-            break
+    print(labelmaxlength,maxwidth,s)

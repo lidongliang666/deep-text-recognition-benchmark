@@ -12,7 +12,7 @@ import numpy as np
 from nltk.metrics.distance import edit_distance
 
 from utils import CTCLabelConverter, AttnLabelConverter, Averager
-from dataset import hierarchical_dataset, AlignCollate, TalOcrChnDataset
+from dataset import hierarchical_dataset, AlignCollate, TalOcrChnDataset,TalOcrEngDataset
 from model import Model
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
@@ -231,8 +231,11 @@ def test(opt):
         else:
             log = open(f'./result/{opt.exp_name}/log_evaluation.txt', 'a')
             AlignCollate_evaluation = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD)
-            if opt.eval_data == "haoweilai":
+            if opt.eval_data == "haoweilaichn":
                 eval_data = TalOcrChnDataset("/home/ldl/桌面/论文/文本识别/data/TAL_OCR_CHN手写中文数据集/test_64")
+            elif opt.eval_data == "haoweilaieng":
+                eval_data = TalOcrEngDataset("/home/ldl/桌面/论文/文本识别/data/TAL_OCR_ENG手写英文数据集/data_composition",
+                    "/home/ldl/桌面/论文/文本识别/data/TAL_OCR_ENG手写英文数据集/label_test.txt")
             else:    
                 eval_data, eval_data_log = hierarchical_dataset(root=opt.eval_data, opt=opt)
                 log.write(eval_data_log)

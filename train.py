@@ -14,7 +14,13 @@ from torch.utils.data import ConcatDataset
 import numpy as np
 
 from utils import CTCLabelConverter, CTCLabelConverterForBaiduWarpctc, AttnLabelConverter, Averager
-from dataset import hierarchical_dataset, AlignCollate, Batch_Balanced_Dataset, iiit5k_dataset_builder,TextRecognition
+from dataset import (hierarchical_dataset, 
+    AlignCollate, 
+    Batch_Balanced_Dataset, 
+    iiit5k_dataset_builder,
+    TextRecognition,
+    PpocrDataset,
+    PpocrDataset_formtwi)
 from model import Model
 from test import validation
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -36,9 +42,15 @@ def train(opt):
     # valid_dataset, valid_dataset_log = hierarchical_dataset(root=opt.valid_data, opt=opt)
     # train_dataset = iiit5k_dataset_builder("/media/ps/hd1/lll/textRecognition/SAR/IIIT5K/train",
     #     "/media/ps/hd1/lll/textRecognition/SAR/IIIT5K/traindata.mat",opt)
-    train_dataset_chinese = TextRecognition(4068*75,opt.charalength,opt.characterfile)
-    train_dataset_english = TextRecognition(4068*25,opt.charalength,opt.englishfile)
-    train_dataset = ConcatDataset([train_dataset_chinese,train_dataset_english])
+    
+    train_dataset = PpocrDataset("/home/ldl/桌面/论文/文本识别/data/paddleocr",
+    "/home/ldl/桌面/论文/文本识别/data/paddleocr/label/train.txt",6625*100)
+    
+
+
+    # train_dataset_chinese = TextRecognition(4068*75,opt.charalength,opt.characterfile)
+    # train_dataset_english = TextRecognition(4068*25,opt.charalength,opt.englishfile)
+    # train_dataset = ConcatDataset([train_dataset_chinese,train_dataset_english])
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=opt.batch_size,
         shuffle=True,  # 'True' to check training progress with validation function.
@@ -47,9 +59,12 @@ def train(opt):
 
     # valid_dataset = iiit5k_dataset_builder("/media/ps/hd1/lll/textRecognition/SAR/IIIT5K/test",
     #     "/media/ps/hd1/lll/textRecognition/SAR/IIIT5K/testdata.mat",opt)
-    valid_dataset_chinese = TextRecognition(1001,opt.charalength,opt.characterfile)
-    valid_dataset_english = TextRecognition(1001,opt.charalength,opt.englishfile)
-    valid_dataset = ConcatDataset([valid_dataset_chinese,valid_dataset_english])
+    # valid_dataset_chinese = TextRecognition(1001,opt.charalength,opt.characterfile)
+    # valid_dataset_english = TextRecognition(1001,opt.charalength,opt.englishfile)
+    # valid_dataset = ConcatDataset([valid_dataset_chinese,valid_dataset_english])
+    valid_dataset = PpocrDataset("/home/ldl/桌面/论文/文本识别/data/paddleocr/Synthetic_Chinese_String_Dataset/images",
+    "/home/ldl/桌面/论文/文本识别/data/paddleocr/Synthetic_Chinese_String_Dataset/test.txt",6625,
+        split='jpg')
     valid_loader = torch.utils.data.DataLoader(
         valid_dataset, batch_size=opt.batch_size,
         shuffle=True,  # 'True' to check training progress with validation function.
@@ -128,6 +143,8 @@ def train(opt):
         filtered_parameters.append(p)
         params_num.append(np.prod(p.size()))
     print('Trainable params num : ', sum(params_num))
+    print(f"Train dataset length {len(train_dataset)}")
+    print(f"Train dataset length {len(valid_dataset)}")
     # [print(name, p.numel()) for name, p in filter(lambda p: p[1].requires_grad, model.named_parameters())]
 
     # setup optimizer
@@ -152,12 +169,12 @@ def train(opt):
 
     """ start training """
     start_iter = 0
-    if opt.saved_model != '':
-        try:
-            start_iter = int(opt.saved_model.split('_')[-1].split('.')[0])
-            print(f'continue to train, start_iter: {start_iter}')
-        except:
-            pass
+    # if opt.saved_model != '':
+    #     try:
+    #         start_iter = int(opt.saved_model.split('_')[-1].split('.')[0])
+    #         print(f'continue to train, start_iter: {start_iter}')
+    #     except:
+    #         pass
 
     start_time = time.time()
     best_accuracy = -1
@@ -171,8 +188,8 @@ def train(opt):
         try:
 
             image_tensors, labels = train_iter_loader.next()
-            if len(labels)>80:
-                print(labels)
+            # if len(labels)>80:
+            #     print(labels)
             print("{:4}".format(iteration),end='\r')
         except StopIteration:
             epoch += 1

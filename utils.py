@@ -13,8 +13,9 @@ class CTCLabelConverter(object):
         for i, char in enumerate(dict_character):
             # NOTE: 0 is reserved for 'CTCblank' token required by CTCLoss
             self.dict[char] = i + 1
-
-        self.character = ['[CTCblank]'] + dict_character  # dummy '[CTCblank]' token for CTCLoss (index 0)
+        self.UNK = '[UNK]'
+        self.dict[self.UNK] = len(dict_character) + 1
+        self.character = ['[CTCblank]'] + dict_character + [self.UNK] # dummy '[CTCblank]' token for CTCLoss (index 0)
 
     def encode(self, text, batch_max_length=25):
         """convert text-label into text-index.
@@ -32,7 +33,7 @@ class CTCLabelConverter(object):
         batch_text = torch.LongTensor(len(text), batch_max_length).fill_(0)
         for i, t in enumerate(text):
             text = list(t)
-            text = [self.dict[char] for char in text]
+            text = [self.dict[char] if char in self.dict else self.dict[self.UNK] for char in text ]
             batch_text[i][:len(text)] = torch.LongTensor(text)
         return (batch_text.to(device), torch.IntTensor(length).to(device))
 
@@ -48,6 +49,17 @@ class CTCLabelConverter(object):
                     char_list.append(self.character[t[i]])
             text = ''.join(char_list)
 
+            texts.append(text)
+        return texts
+
+    def decode_for_predict(self,text_index):
+        texts = []
+        for t in text_index:
+            char_list = []
+            for i in t:
+                if i != 0 and ( not(i>0 and t[i-1] == t[i])):
+                    char_list.append(self.character[t[i]])
+            text = ''.join(char_list)
             texts.append(text)
         return texts
 
