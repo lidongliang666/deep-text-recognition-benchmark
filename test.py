@@ -12,7 +12,7 @@ import numpy as np
 from nltk.metrics.distance import edit_distance
 
 from utils import CTCLabelConverter, AttnLabelConverter, Averager
-from dataset import hierarchical_dataset, AlignCollate, TalOcrChnDataset,TalOcrEngDataset
+from dataset import hierarchical_dataset, AlignCollate, TalOcrChnDataset,TalOcrEngDataset,mytrdg_cutimg_dataset
 from model import Model
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
@@ -78,7 +78,7 @@ def benchmark_all_eval(model, criterion, converter, opt, calculate_infer_time=Fa
     return None
 
 
-def validation(model, criterion, evaluation_loader, converter, opt, printlabel=False):
+def validation(model, criterion, evaluation_loader, converter, opt, printlabel=False,decodewithoutlen=False):
     """ validation or evaluation """
     n_correct = 0
     norm_ED = 0
@@ -116,7 +116,10 @@ def validation(model, criterion, evaluation_loader, converter, opt, printlabel=F
                 preds_index = preds_index.view(-1)
             else:
                 _, preds_index = preds.max(2)
-            preds_str = converter.decode(preds_index.data, preds_size.data)
+            if decodewithoutlen:
+                preds_str = converter.decode_for_predict(preds_index.data)
+            else:
+                preds_str = converter.decode(preds_index.data, preds_size.data)
         
         else:
             preds = model(image, text_for_pred, is_train=False)
@@ -236,6 +239,9 @@ def test(opt):
             elif opt.eval_data == "haoweilaieng":
                 eval_data = TalOcrEngDataset("/home/ldl/桌面/论文/文本识别/data/TAL_OCR_ENG手写英文数据集/data_composition",
                     "/home/ldl/桌面/论文/文本识别/data/TAL_OCR_ENG手写英文数据集/label_test.txt")
+            elif opt.eval_data == 'trueeng':
+                eval_data = mytrdg_cutimg_dataset(total_img_path='/home/ldl/桌面/论文/文本识别/data/finish_data/eng_image/test/img',
+        annotation_path='/home/ldl/桌面/论文/文本识别/data/finish_data/eng_image/test/gt')
             else:    
                 eval_data, eval_data_log = hierarchical_dataset(root=opt.eval_data, opt=opt)
                 log.write(eval_data_log)
@@ -244,10 +250,11 @@ def test(opt):
                 shuffle=False,
                 num_workers=int(opt.workers),
                 collate_fn=AlignCollate_evaluation, pin_memory=True)
-            _, accuracy_by_best_model, _, _, _, _, _, _ = validation(
-                model, criterion, evaluation_loader, converter, opt,printlabel=True)
+            _, accuracy_by_best_model, current_norm_ED, _, _, _, _, _ = validation(
+                model, criterion, evaluation_loader, converter, opt,printlabel=True,decodewithoutlen=True)
             
             print(f'{accuracy_by_best_model:0.3f}')
+            print(f'{current_norm_ED:0.3f}')
             log.write(f'{accuracy_by_best_model:0.3f}\n')
             log.close()
 
@@ -283,8 +290,6 @@ if __name__ == '__main__':
     opt = parser.parse_args()
 
     """ vocab / character number configuration """
-    if os.path.isfile(opt.character):
-        opt.character = ''.join([i[0] for i in open(opt.character)])
     if opt.sensitive:
         opt.character = string.printable[:-6]  # same with ASTER setting (use 94 char).
 

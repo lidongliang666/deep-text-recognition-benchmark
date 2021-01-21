@@ -20,7 +20,8 @@ from dataset import (hierarchical_dataset,
     iiit5k_dataset_builder,
     TextRecognition,
     PpocrDataset,
-    PpocrDataset_formtwi)
+    PpocrDataset_formtwi,
+    mytrdg_cutimg_dataset)
 from model import Model
 from test import validation
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -43,14 +44,19 @@ def train(opt):
     # train_dataset = iiit5k_dataset_builder("/media/ps/hd1/lll/textRecognition/SAR/IIIT5K/train",
     #     "/media/ps/hd1/lll/textRecognition/SAR/IIIT5K/traindata.mat",opt)
     
-    train_dataset = PpocrDataset("/home/ldl/桌面/论文/文本识别/data/paddleocr",
-    "/home/ldl/桌面/论文/文本识别/data/paddleocr/label/train.txt",6625*100)
+    # train_dataset = PpocrDataset("/home/ldl/桌面/论文/文本识别/data/paddleocr",
+    # "/home/ldl/桌面/论文/文本识别/data/paddleocr/label/train.txt",6625*100)
     
 
 
-    # train_dataset_chinese = TextRecognition(4068*75,opt.charalength,opt.characterfile)
+    # train_dataset_chinese = TextRecognition(4068*75,opt.charalength,opt.chinesefile)
     # train_dataset_english = TextRecognition(4068*25,opt.charalength,opt.englishfile)
     # train_dataset = ConcatDataset([train_dataset_chinese,train_dataset_english])
+    train_dataset_xunfeieng = mytrdg_cutimg_dataset(total_img_path='/home/ldl/桌面/论文/文本识别/data/finish_data/eng_image/train/img',
+        annotation_path='/home/ldl/桌面/论文/文本识别/data/finish_data/eng_image/train/gt')
+    train_dataset_xunfeichn = mytrdg_cutimg_dataset(total_img_path='/home/ldl/桌面/论文/文本识别/data/finish_data/lan_image/train/img',
+        annotation_path='/home/ldl/桌面/论文/文本识别/data/finish_data/lan_image/train/gt')
+    train_dataset = ConcatDataset([train_dataset_xunfeichn,train_dataset_xunfeieng])
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=opt.batch_size,
         shuffle=True,  # 'True' to check training progress with validation function.
@@ -59,12 +65,19 @@ def train(opt):
 
     # valid_dataset = iiit5k_dataset_builder("/media/ps/hd1/lll/textRecognition/SAR/IIIT5K/test",
     #     "/media/ps/hd1/lll/textRecognition/SAR/IIIT5K/testdata.mat",opt)
-    # valid_dataset_chinese = TextRecognition(1001,opt.charalength,opt.characterfile)
+    # valid_dataset_chinese = TextRecognition(1001,opt.charalength,opt.chinesefile)
     # valid_dataset_english = TextRecognition(1001,opt.charalength,opt.englishfile)
     # valid_dataset = ConcatDataset([valid_dataset_chinese,valid_dataset_english])
-    valid_dataset = PpocrDataset("/home/ldl/桌面/论文/文本识别/data/paddleocr/Synthetic_Chinese_String_Dataset/images",
-    "/home/ldl/桌面/论文/文本识别/data/paddleocr/Synthetic_Chinese_String_Dataset/test.txt",6625,
-        split='jpg')
+
+    valid_dataset_xunfeieng = mytrdg_cutimg_dataset(total_img_path='/home/ldl/桌面/论文/文本识别/data/finish_data/eng_image/test/img',
+        annotation_path='/home/ldl/桌面/论文/文本识别/data/finish_data/eng_image/test/gt')
+    valid_dataset_xunfeichn = mytrdg_cutimg_dataset(total_img_path='/home/ldl/桌面/论文/文本识别/data/finish_data/lan_image/test/img',
+        annotation_path='/home/ldl/桌面/论文/文本识别/data/finish_data/lan_image/test/gt')
+    valid_dataset = ConcatDataset([valid_dataset_xunfeichn,valid_dataset_xunfeieng])
+
+    # valid_dataset = PpocrDataset("/home/ldl/桌面/论文/文本识别/data/paddleocr/Synthetic_Chinese_String_Dataset/images",
+    # "/home/ldl/桌面/论文/文本识别/data/paddleocr/Synthetic_Chinese_String_Dataset/test.txt",6625,
+    #     split='jpg')
     valid_loader = torch.utils.data.DataLoader(
         valid_dataset, batch_size=opt.batch_size,
         shuffle=True,  # 'True' to check training progress with validation function.
@@ -152,7 +165,7 @@ def train(opt):
     #     optimizer = optim.Adam(filtered_parameters, lr=opt.lr, betas=(opt.beta1, 0.999))
     # else:
     #     optimizer = optim.Adadelta(filtered_parameters, lr=opt.lr, rho=opt.rho, eps=opt.eps)
-    optimizer = optim.Adam(filtered_parameters)
+    optimizer = optim.Adam(filtered_parameters,lr=0.0001)
     print("Optimizer:")
     print(optimizer)
 
@@ -252,10 +265,10 @@ def train(opt):
                 current_model_log = f'{"Current_accuracy":17s}: {current_accuracy:0.3f}, {"Current_norm_ED":17s}: {current_norm_ED:0.2f}'
 
                 # keep best accuracy model (on valid dataset)
-                if current_accuracy > best_accuracy:
+                if current_accuracy >= best_accuracy:
                     best_accuracy = current_accuracy
                     torch.save(model.state_dict(), f'./saved_models/{opt.exp_name}/best_accuracy.pth')
-                if current_norm_ED > best_norm_ED:
+                if current_norm_ED >= best_norm_ED:
                     best_norm_ED = current_norm_ED
                     torch.save(model.state_dict(), f'./saved_models/{opt.exp_name}/best_norm_ED.pth')
                 best_model_log = f'{"Best_accuracy":17s}: {best_accuracy:0.3f}, {"Best_norm_ED":17s}: {best_norm_ED:0.2f}'
@@ -322,6 +335,7 @@ if __name__ == '__main__':
                         default='0123456789abcdefghijklmnopqrstuvwxyz', help='character label')
     parser.add_argument('--characterfile', type=str,
                         default='None', help='character label file')
+    parser.add_argument('--chinesefile',type=str,help='chinese char dict file')
     parser.add_argument('--charalength',type=int,help='GAN char length')
     parser.add_argument('--englishfile',type=str,help='english char dict file')
     parser.add_argument('--sensitive', action='store_true', help='for sensitive character mode')
@@ -340,6 +354,7 @@ if __name__ == '__main__':
                         help='the number of output channel of Feature extractor')
     parser.add_argument('--hidden_size', type=int, default=256, help='the size of the LSTM hidden state')
     parser.add_argument('--num_gpu',type=int,default=1)
+    parser.add_argument('--predict', action='store_true',help='predict decode without arg length')
 
     opt = parser.parse_args()
 
@@ -367,6 +382,7 @@ if __name__ == '__main__':
 
     cudnn.benchmark = True
     cudnn.deterministic = True
+    torch.backends.cudnn.enabled = False
     # opt.num_gpu = torch.cuda.device_count()
     # print('device count', opt.num_gpu)
     if opt.num_gpu > 1:

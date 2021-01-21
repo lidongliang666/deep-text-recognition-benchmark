@@ -155,11 +155,12 @@ def iiit5k_mat_extractor(label_path):
 
     return dict_img
 class base_cutimg_dataset(Dataset):
-    def __init__(self,total_img_path,annotation_path,rgb_mode=False,sensitive=False):
+    def __init__(self,total_img_path,annotation_path,rgb_mode=False,sensitive=False,max_char_length=90):
         self.total_img_path = total_img_path
         self.annotation_path = annotation_path
         self.rgb_mode = rgb_mode
         self.sensitive = sensitive
+        self.max_char_length = max_char_length
 
         self.dataset = self.loaddataset(total_img_path,annotation_path)
 
@@ -171,6 +172,9 @@ class base_cutimg_dataset(Dataset):
 
     def __getitem__(self,index):
         img_name, bdb, label = self.dataset[index]
+        if len(label) > self.max_char_length:
+            return None
+        # print(img_name)
         
         if self.rgb_mode:
             img = Image.open(os.path.join(self.total_img_path,img_name)).convert('RGB')  # for color image
@@ -181,8 +185,16 @@ class base_cutimg_dataset(Dataset):
             img = Image.open(os.path.join(self.total_img_path,img_name)).convert('L')
             W,H = img.size
         bdb = self.ctrl_xt(bdb,H,W)
-        print(H,W,bdb,label)
+        # print(H,W,bdb,label)
         img = img.crop(bdb)
+        # if self.rgb_mode:
+        #     raise NotImplementedError
+        # else:
+        #     W,H = img.size
+        #     if H > W or W <= 0 or H<=0:
+        #         print(W,H,'------------',img_name)
+        #         return None
+
         return img, label
     
     def ctrl_xt(self,bdb,imgH,imgW):
@@ -204,8 +216,20 @@ class mytrdg_cutimg_dataset(base_cutimg_dataset):
             imgname = labelname[:-3]+'jpg'
             for line in open(os.path.join(annotation_path,labelname)):
                 # print(line)
-                tleft_x,tleft_y,_,_,bright_x,bright_y,_,_,*label = line.split(',')
-                dataset.append([imgname,[int(tleft_x),int(tleft_y),int(bright_x),int(bright_y)],','.join(label).strip()])
+                tleft_x,tleft_y,x1,y1,bright_x,bright_y,x2,y2,*label = line.split(',')
+                x = [int(i) for i in [tleft_x,x1,bright_x,x2]]
+                y = [int(i) for i in [tleft_y,y1,bright_y,y2]]
+
+                tleft_x = min(x)
+                tleft_y = min(y)
+                bright_x = max(x)
+                bright_y = max(y)
+                h = bright_y - tleft_y
+                w = bright_x - tleft_x
+                if h > w or h <=1 or w <= 1:
+                    continue
+
+                dataset.append([imgname,[tleft_x,tleft_y,bright_x,bright_y],','.join(label).strip()])
         return dataset
 
 
@@ -332,7 +356,7 @@ class PpocrDataset(Dataset):
         self.split = split
         # self.number = 0
         # self.test = test
-        self.dataset = [self.get_imgname_label(i) for i in open(labelfilepath) if (not i  is None)]
+        self.dataset = [self.get_imgname_label(i) for i in open(labelfilepath)]
 
     def __len__(self):
         return self.length
@@ -348,9 +372,10 @@ class PpocrDataset(Dataset):
         # else:
         #     imgname,label = self.dataset[index]
         
-        imgname,label =  random.choice(self.dataset)
+        
 
         try:
+            imgname,label =  random.choice(self.dataset)
             if self.rgb_mode:
                 
                 return Image.open(os.path.join(self.imgdir,imgname)).convert('RGB'), label
@@ -559,7 +584,12 @@ class AlignCollate(object):
 
     def __call__(self, batch):
         batch = filter(lambda x: x is not None, batch)
-        images, labels = zip(*batch)
+        try:
+            images, labels = zip(*batch)
+        except:
+            print(len(list(batch)))
+            raise ''
+
         wlist = []
         for image in images:
             w, h = image.size
@@ -593,6 +623,48 @@ class AlignCollate(object):
             image_tensors = torch.cat([t.unsqueeze(0) for t in image_tensors], 0)
 
         return image_tensors, labels
+
+class AlignCollateForInfer:
+    def __init__(self, imgH=32, imgW=100, keep_ratio_with_pad=False):
+        self.imgH = imgH
+        self.imgW = imgW
+        self.keep_ratio_with_pad = keep_ratio_with_pad
+
+    def __call__(self, images):
+    
+        wlist = []
+        for image in images:
+            w, h = image.size
+            ratio = w / float(h)
+            wlist.append(math.ceil(self.imgH * ratio))
+        
+        if self.keep_ratio_with_pad:  # same concept with 'Rosetta' paper
+            resized_max_w = max(wlist)
+            resized_max_w = resized_max_w if resized_max_w <= self.imgW else self.imgW
+            input_channel = 3 if images[0].mode == 'RGB' else 1
+
+            transform = NormalizePAD((input_channel, self.imgH, resized_max_w))
+
+            resized_images = []
+            for i,image in enumerate(images):
+                
+                if wlist[i] > self.imgW:
+                    resized_w = self.imgW
+                else:
+                    resized_w = wlist[i]
+
+                resized_image = image.resize((resized_w, self.imgH), Image.BICUBIC)
+                resized_images.append(transform(resized_image))
+                # resized_image.save('./image_test/%d_test.jpg' % w)
+
+            image_tensors = torch.cat([t.unsqueeze(0) for t in resized_images], 0)
+
+        else:
+            transform = ResizeNormalize((self.imgW, self.imgH))
+            image_tensors = [transform(image) for image in images]
+            image_tensors = torch.cat([t.unsqueeze(0) for t in image_tensors], 0)
+
+        return image_tensors
 
 
 def tensor2im(image_tensor, imtype=np.uint8):
@@ -636,46 +708,58 @@ if __name__ == "__main__":
     #     if i >= 100:
     #         break 
     ############################
-    # train_dataset = mytrdg_cutimg_dataset(total_img_path='/home/ldl/桌面/论文/文本检测/data/trdg_for_detector/train/images',
-    #     annotation_path='/home/ldl/桌面/论文/文本检测/data/trdg_for_detector/train/label')
-    # print(len(train_dataset))
-    # for i, (img,label) in enumerate(train_dataset):
-    #     print(label)
-    #     img.save(f'/home/ldl/桌面/out/{i}.jpg')
-    #     if i >= 100:
-    #         break
+    train_dataset = mytrdg_cutimg_dataset(total_img_path='/home/ldl/桌面/论文/文本识别/data/finish_data/eng_image/img',
+        annotation_path='/home/ldl/桌面/论文/文本识别/data/finish_data/eng_image/gt')
+    print(len(train_dataset))
+    for i, (img,label) in enumerate(train_dataset):
+        print(label)
+        # print(f'{i:07}',end='/r')
+        img.save(f'/home/ldl/桌面/out/{i}.jpg')
+        if i >= 1000:
+            break
     ######################
-    dataset_ICDAR2019_ArT = PpocrDataset("/home/ldl/桌面/论文/文本识别/data/paddleocr/ICDAR2019-ArT",
-        "/home/ldl/桌面/论文/文本识别/data/paddleocr/ICDAR2019-ArT.txt",50029)
-    dataset_rctw = PpocrDataset("/home/ldl/桌面/论文/文本识别/data/paddleocr/icdar2017rctw_train_v1.2",
-        "/home/ldl/桌面/论文/文本识别/data/paddleocr/icdar2017rctw_train_v1.2.txt",46739)
-    dataset_ICDAR2019 = PpocrDataset("/home/ldl/桌面/论文/文本识别/data/paddleocr/ICDAR2019-LSVT",
-        "/home/ldl/桌面/论文/文本识别/data/paddleocr/ICDAR2019-LSVT.txt",240047)
-    dataset_mtwi = PpocrDataset("/home/ldl/桌面/论文/文本识别/data/paddleocr/mtwi_2018",
-        "/home/ldl/桌面/论文/文本识别/data/paddleocr/mtwi_2018.txt",144202)
-    dataset_chn = PpocrDataset("/home/ldl/桌面/论文/文本识别/data/paddleocr/中文街景文字识别",
-        "/home/ldl/桌面/论文/文本识别/data/paddleocr/中文街景文字识别.txt",212023)
-    dataset_Synthetic = PpocrDataset("/home/ldl/桌面/论文/文本识别/data/paddleocr/Synthetic_Chinese_String_Dataset/images",
-    "/home/ldl/桌面/论文/文本识别/data/paddleocr/Synthetic_Chinese_String_Dataset/train.txt",3279606)
+    # dataset_ICDAR2019_ArT = PpocrDataset("/home/ldl/桌面/论文/文本识别/data/paddleocr/ICDAR2019-ArT",
+    #     "/home/ldl/桌面/论文/文本识别/data/paddleocr/ICDAR2019-ArT.txt",50029)
+    # dataset_rctw = PpocrDataset("/home/ldl/桌面/论文/文本识别/data/paddleocr/icdar2017rctw_train_v1.2",
+    #     "/home/ldl/桌面/论文/文本识别/data/paddleocr/icdar2017rctw_train_v1.2.txt",46739)
+    # dataset_ICDAR2019 = PpocrDataset("/home/ldl/桌面/论文/文本识别/data/paddleocr/ICDAR2019-LSVT",
+    #     "/home/ldl/桌面/论文/文本识别/data/paddleocr/ICDAR2019-LSVT.txt",240047)
+    # dataset_mtwi = PpocrDataset("/home/ldl/桌面/论文/文本识别/data/paddleocr/mtwi_2018",
+    #     "/home/ldl/桌面/论文/文本识别/data/paddleocr/mtwi_2018.txt",144202)
+    # dataset_chn = PpocrDataset("/home/ldl/桌面/论文/文本识别/data/paddleocr/中文街景文字识别",
+    #     "/home/ldl/桌面/论文/文本识别/data/paddleocr/中文街景文字识别.txt",212023)
+    # dataset_Synthetic = PpocrDataset("/home/ldl/桌面/论文/文本识别/data/paddleocr/Synthetic_Chinese_String_Dataset/images",
+    # "/home/ldl/桌面/论文/文本识别/data/paddleocr/Synthetic_Chinese_String_Dataset/train.txt",3279606)
     # dataset = ConcatDataset([dataset_ICDAR2019_ArT,dataset_rctw,dataset_ICDAR2019,dataset_Synthetic,
     #     dataset_chn,dataset_mtwi])
-    
+    # AlignCollate_valid = AlignCollate(imgH=32, imgW=1024, keep_ratio_with_pad=True)
+    # train_loader = torch.utils.data.DataLoader(
+    #     dataset_ICDAR2019_ArT, batch_size=4,
+    #     shuffle=True,  # 'True' to check training progress with validation function.
+    #     num_workers=int(1),
+    #     collate_fn=AlignCollate_valid)
+    # for image_tensors, labels in train_loader:
+    #     print(image_tensors.shape)
+    #     print(labels)
+    #     break
+    ######################################
     # print(len(dataset))
-    labelmaxlength = 0
-    maxwidth = 0
-    s = ''
-    for i, batch in enumerate(dataset_mtwi):
-        if batch :
-            image,lalel = batch
-        else:
-            continue
-        W,H = image.size
-        resizeW = W / H *32
-        if resizeW > maxwidth:
-            maxwidth = resizeW
-        if len(lalel) > labelmaxlength:
-            labelmaxlength = len(lalel)
-            s = lalel
-        print(f'{i:09}',end="\r")
+    # labelmaxlength = 0
+    # maxwidth = 0
+    # s = ''
+    # for i, batch in enumerate(dataset_mtwi):
+    #     if batch :
+    #         image,lalel = batch
+    #     else:
+    #         continue
+    #     W,H = image.size
+    #     resizeW = W / H *32
+    #     if resizeW > maxwidth:
+    #         maxwidth = resizeW
+    #     if len(lalel) > labelmaxlength:
+    #         labelmaxlength = len(lalel)
+    #         s = lalel
+    #     print(f'{i:09}',end="\r")
 
-    print(labelmaxlength,maxwidth,s)
+    # print(labelmaxlength,maxwidth,s)
+    ################################

@@ -1,3 +1,4 @@
+import os
 import torch
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -7,6 +8,9 @@ class CTCLabelConverter(object):
 
     def __init__(self, character):
         # character (str): set of the possible characters.
+        if os.path.isfile(character):
+            character = ''.join([i[0] for i in open(character)])
+
         dict_character = list(character)
 
         self.dict = {}
@@ -49,18 +53,18 @@ class CTCLabelConverter(object):
                     char_list.append(self.character[t[i]])
             text = ''.join(char_list)
 
-            texts.append(text)
+            texts.append(text.replace("[UNK]"," "))
         return texts
 
     def decode_for_predict(self,text_index):
         texts = []
         for t in text_index:
             char_list = []
-            for i in t:
-                if i != 0 and ( not(i>0 and t[i-1] == t[i])):
-                    char_list.append(self.character[t[i]])
+            for i,index in enumerate(t):
+                if index != 0 and ( not(index>0 and index == t[i-1])):
+                    char_list.append(self.character[index])
             text = ''.join(char_list)
-            texts.append(text)
+            texts.append(text.replace("[UNK]"," "))
         return texts
 
 
