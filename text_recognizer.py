@@ -1,15 +1,23 @@
 import os
+import sys
+import pathlib
+__dir__ = pathlib.Path(os.path.abspath(__file__))
+
+print(str(__dir__.parent))
+sys.path.insert(3,str(__dir__.parent))
 
 import torch
 
 from  model import Model
-from utils import CTCLabelConverter
+from recognizer_utils import CTCLabelConverter
 from dataset import AlignCollateForInfer 
+
+
 
 class OcrTextRecognizer:
     
 
-    def __init__(self,character,device="cpu"):
+    def __init__(self,character,weigthpath,device="cpu"):
         '''
         character : 预测字符集字符串("abcde.....xyz")或者文件
         '''
@@ -23,12 +31,14 @@ class OcrTextRecognizer:
         self.batch_size = 8 
         self.aligncollate = AlignCollateForInfer(imgH=32,imgW=1024,keep_ratio_with_pad=True)
         self.device = device
+        self.setweigth(weigthpath)
 
     def setweigth(self,weigthpath='None'):
         if os.path.exists(weigthpath):
             self.text_recognizer.load_state_dict(
                 torch.load(weigthpath,map_location=self.device)
             )
+            self.text_recognizer.eval()
             print(f"load weigth file:{weigthpath}")
         else:
             print(f"not exists file{weigthpath}")
